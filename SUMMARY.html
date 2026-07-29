@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Protocol Architecture Summary</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 20px; color: #333; }
+        h1, h2 { border-bottom: 1px solid #eaecef; padding-bottom: 0.3em; }
+        code { background-color: #f6f8fa; padding: 0.2em 0.4em; border-radius: 3px; font-family: monospace; }
+        .section { margin-bottom: 30px; }
+    </style>
+</head>
+<body>
+    <h1>Protocol Architecture & Design Summary</h1>
+    
+    <div class="section">
+        <h2>1. The Problem Space</h2>
+        <p>The system requires transporting 160-byte media frames every 20ms across a hostile UDP network that drops, delays, reorders, and duplicates packets. To produce a valid run, the protocol must maintain a deadline miss rate of &le; 1.00% and a bandwidth overhead of &le; 2.00x, while achieving the lowest possible playout delay.</p>
+    </div>
+
+    <div class="section">
+        <h2>2. Architecture & Design Choices</h2>
+        <h3>Why Forward Error Correction (FEC) over ARQ?</h3>
+        <p>An Automatic Repeat Request (ARQ) system relying on a feedback channel requires waiting a full Round Trip Time (RTT) to request and receive a dropped packet. This severely inflates playout delay. Because the grading heavily favors low latency, we chose Forward Error Correction (FEC) via bitwise XOR parity. This preemptively pushes recovery data across the network, allowing the receiver to reconstruct lost frames without requesting them.</p>
+
+        <h3>Why XOR Parity over 100% Duplication?</h3>
+        <p>Sending two copies of every frame mathematically results in a ~2.05x bandwidth overhead due to the 4-byte sequence headers on the 160-byte payloads. To comfortably beat the 2.00x cap, our sender pairs two consecutive data frames and generates a single XOR parity packet. This limits our bandwidth overhead to an efficient 1.54x (3 packets sent for every 2 frames generated).</p>
+
+        <h3>The Stateless Receiver</h3>
+        <p>Traditional jitter buffers get stuck waiting for sequential packets (head-of-line blocking). Our receiver is designed as a stateless, instant forwarder. It ignores order and fires data directly to the player port. If an XOR parity packet arrives, the receiver instantly checks if one of its constituent data frames is missing. If a gap is detected, it calculates the missing bytes and forwards the recovered packet immediately.</p>
+    </div>
+
+    <div class="section">
+        <h2>3. System-Level Implementation Details</h2>
+        <ul>
+            <li><strong>Bit Hijacking for Parity:</strong> The sender uses the highest bit of the 4-byte sequence number (<code>0x80000000</code>) as a flag. The receiver uses a bitwise AND (<code>0x7FFFFFFF</code>) to mask the flag and route the payload to either the data buffer or the parity buffer.</li>
+            <li><strong>Memory Management:</strong> To prevent the C++ maps from causing memory leaks during extended runs, the receiver routinely checks sequence numbers and erases packets older than 1,000ms.</li>
+            <li><strong>Non-Blocking Sockets:</strong> The receiver does not rely on strict temporal blocking. By reading available bytes as fast as possible, it limits CPU overhead while ensuring it never misses a tight playout deadline.</li>
+        </ul>
+    </div>
+</body>
+</html>

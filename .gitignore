@@ -1,0 +1,9 @@
+﻿# Binaries
+sender
+receiver
+*.exe
+*.o
+
+# Python Bytecode
+__pycache__/
+*.pyc
